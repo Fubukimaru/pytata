@@ -193,11 +193,19 @@ def sleep_minutes(minutes: int) -> None:
     time.sleep(minutes * 60)
 
 
+def run_interval(minutes: int, label: str, status_file: Path | None, simple: bool) -> None:
+    prefix = "" if simple else "\r"
+    suffix = "\n" if simple else ""
+    for minutes_left in range(minutes, 0, -1):
+        message = f"{minutes_left}m left of {label}"
+        print(f"{prefix}{message}{suffix}", end="", flush=True)
+        write_status(status_file, f"{message}\n")
+        sleep_minutes(1)
+
+
 def pomodoro(args: argparse.Namespace) -> int:
     task_id = args.task or task_id_from_next(args.filter)
     status_file = Path(args.output) if args.output else None
-    time_left = "%im left of %s"
-    time_left_file = "%im left of %s\n"
 
     def shutdown(signum: int | None = None, frame: object | None = None) -> None:
         if signum is not None:
@@ -209,20 +217,12 @@ def pomodoro(args: argparse.Namespace) -> int:
     signal.signal(signal.SIGINT, shutdown)
 
     run_command("task", task_id, "list")
-    if args.simple:
-        time_left = f"{time_left}\n"
-    else:
-        time_left = f"\r{time_left}"
-
     try:
         for current in range(args.pomodori, 0, -1):
             print(current)
             task_command(task_id, "start")
 
-            for minutes_left in range(args.work, 0, -1):
-                print(time_left % (minutes_left, "work"), end="", flush=True)
-                write_status(status_file, time_left_file % (minutes_left, "work"))
-                sleep_minutes(1)
+            run_interval(args.work, "work", status_file, args.simple)
 
             if not args.mute:
                 play_notification(args.num_beeps, Path(args.sound).expanduser())
@@ -236,10 +236,7 @@ def pomodoro(args: argparse.Namespace) -> int:
             if current == 1:
                 continue
 
-            for minutes_left in range(args.pause, 0, -1):
-                print(time_left % (minutes_left, "pause"), end="", flush=True)
-                write_status(status_file, time_left_file % (minutes_left, "pause"))
-                sleep_minutes(1)
+            run_interval(args.pause, "pause", status_file, args.simple)
 
             if not args.mute:
                 play_notification(args.num_beeps, Path(args.sound).expanduser())
