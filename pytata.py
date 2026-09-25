@@ -23,11 +23,34 @@ pause = 5
 pomodori = 4
 num_beeps = 5
 notification = ~/share/linux/patata/notification.wav
+
+[action:read]
+prompt = true
+aliases = pataread
+
+[action:planning]
+prompt = false
+aliases = plan, pataplan
+
+[action:mail]
+prompt = false
+aliases = patamail
+
+[action:meeting]
+prompt = true
+aliases = patameeting
 """
 
 
 class PatataError(RuntimeError):
     """Raised for expected command/runtime failures."""
+
+
+@dataclass(frozen=True)
+class ActionConfig:
+    name: str
+    prompt: bool
+    aliases: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -37,6 +60,25 @@ class PytataConfig:
     pomodori: int
     num_beeps: int
     notification: Path
+    actions: tuple[ActionConfig, ...]
+
+
+def validate_actions(actions: tuple[ActionConfig, ...]) -> None:
+    reserved = {
+        "patata",
+        "end",
+        "pataend",
+        "chrono",
+        "patachrono",
+    }
+    seen = set(reserved)
+    for action in actions:
+        for command_name in (action.name, *action.aliases):
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", command_name):
+                raise ValueError(f"invalid action name or alias: {command_name!r}")
+            if command_name in seen:
+                raise ValueError(f"duplicate or reserved action name: {command_name}")
+            seen.add(command_name)
 
 
 def config_path() -> Path:
@@ -58,12 +100,29 @@ def load_config(path: Path | None = None) -> PytataConfig:
         with path.open(encoding="utf-8") as config_file:
             parser.read_file(config_file)
         section = parser["pomodoro"]
+        actions = tuple(
+            ActionConfig(
+                name=section_name.removeprefix("action:").strip(),
+                prompt=parser[section_name].getboolean("prompt"),
+                aliases=tuple(
+                    alias.strip()
+                    for alias in parser[section_name].get("aliases", "").split(",")
+                    if alias.strip()
+                ),
+            )
+            for section_name in parser.sections()
+            if section_name.startswith("action:")
+        )
+        if not actions or any(not action.name for action in actions):
+            raise ValueError("at least one named [action:NAME] section is required")
+        validate_actions(actions)
         return PytataConfig(
             work=int(section["work"]),
             pause=int(section["pause"]),
             pomodori=int(section["pomodori"]),
             num_beeps=int(section["num_beeps"]),
             notification=Path(section["notification"]).expanduser(),
+            actions=actions,
         )
     except (OSError, KeyError, TypeError, ValueError, configparser.Error) as exc:
         raise PatataError(f"Invalid configuration file {path}: {exc}") from exc
@@ -244,50 +303,9 @@ def dmenu_template(action: str, value: str | None = None) -> int:
     ).returncode
 
 
-def read_template(args: argparse.Namespace) -> int:
-    return dmenu_template("read", args.value)
-
-
-def planning_template(args: argparse.Namespace) -> int:
-    return dmenu_template("planning", "")
-
-
-def mail_template(args: argparse.Namespace) -> int:
-    return dmenu_template("mail", "")
-
-
-def meeting_template(args: argparse.Namespace) -> int:
-    return dmenu_template("meeting", args.value)
-
-
-def read_file_without_cr(path: Path) -> str:
-    if not path.is_file():
-        return ""
-    return path.read_text(encoding="utf-8", errors="replace").replace("\r", "").strip()
-
-
-def timewarrior_tracking_status() -> str:
-    result = run_command("timew", capture=True)
-    if result.returncode != 0:
-        return ""
-    for line in result.stdout.splitlines():
-        if "Tracking" in line:
-            parts = line.split()
-            return " ".join(parts[1:])
-    return ""
-
-
-def status(args: argparse.Namespace) -> int:
-    current_status = read_file_without_cr(Path(args.status_file))
-    if not current_status:
-        current_status = timewarrior_tracking_status()
-
-    woffu = read_file_without_cr(Path(args.woffu_file))
-    if woffu:
-        woffu = f"[{woffu}]"
-
-    print(f"{woffu} {current_status}".strip())
-    return 0
+def run_action(args: argparse.Namespace) -> int:
+    value = args.value if args.value is not None or args.action_prompt else ""
+    return dmenu_template(args.action_name, value)
 
 
 def end(args: argparse.Namespace) -> int:
@@ -331,7 +349,7 @@ def build_parser(config: PytataConfig) -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    pomo = subparsers.add_parser("pomodoro", aliases=["patata"], help="Run the pomodoro timer.")
+    pomo = subparsers.add_parser("patata", help="Run the pomodoro timer.")
     pomo.add_argument("-s", "--simple", action="store_true", help="Use simple line-oriented output.")
     pomo.add_argument("-m", "--mute", action="store_true", help="Do not play notification sounds.")
     pomo.add_argument("-w", "--work", type=int, default=config.work, metavar="MINUTES")
@@ -344,24 +362,14 @@ def build_parser(config: PytataConfig) -> argparse.ArgumentParser:
     pomo.add_argument("--sound", default=str(config.notification))
     pomo.set_defaults(func=pomodoro)
 
-    read_parser = subparsers.add_parser("read", aliases=["pataread"])
-    read_parser.add_argument("value", nargs="?")
-    read_parser.set_defaults(func=read_template)
-
-    planning = subparsers.add_parser("planning", aliases=["plan", "pataplan"])
-    planning.set_defaults(func=planning_template)
-
-    status_parser = subparsers.add_parser("status", aliases=["patatastatus"])
-    status_parser.add_argument("status_file")
-    status_parser.add_argument("woffu_file")
-    status_parser.set_defaults(func=status)
-
-    mail = subparsers.add_parser("mail", aliases=["patamail"])
-    mail.set_defaults(func=mail_template)
-
-    meeting = subparsers.add_parser("meeting", aliases=["patameeting"])
-    meeting.add_argument("value", nargs="?")
-    meeting.set_defaults(func=meeting_template)
+    for action in config.actions:
+        action_parser = subparsers.add_parser(action.name, aliases=list(action.aliases))
+        action_parser.add_argument("value", nargs="?")
+        action_parser.set_defaults(
+            func=run_action,
+            action_name=action.name,
+            action_prompt=action.prompt,
+        )
 
     end_parser = subparsers.add_parser("end", aliases=["pataend"])
     end_parser.add_argument("--target", default="patata")
@@ -381,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         parser = build_parser(load_config())
         if argv and argv[0].startswith("-"):
-            argv.insert(0, "pomodoro")
+            argv.insert(0, "patata")
 
         args = parser.parse_args(argv)
         if not hasattr(args, "func"):

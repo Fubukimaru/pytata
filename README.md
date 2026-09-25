@@ -21,7 +21,7 @@ Pytata itself only uses the Python standard library.
 Run the Pomodoro timer directly:
 
 ```console
-./pytata.py pomodoro
+./pytata.py patata
 ./pytata.py --work 25 --pause 5 --pomodori 4
 ```
 
@@ -32,7 +32,6 @@ The other original helpers are available as subcommands:
 ./pytata.py planning
 ./pytata.py mail
 ./pytata.py meeting
-./pytata.py status STATUS_FILE WOFFU_FILE
 ./pytata.py end
 ./pytata.py chrono TAG [TAG ...]
 ```
@@ -51,6 +50,27 @@ pause = 5
 pomodori = 4
 num_beeps = 5
 notification = ~/share/linux/patata/notification.wav
+
+[action:read]
+prompt = true
+aliases = pataread
+
+[action:planning]
+prompt = false
+aliases = plan, pataplan
+
+[action:mail]
+prompt = false
+aliases = patamail
+
+[action:meeting]
+prompt = true
+aliases = patameeting
 ```
 
 Command-line options override values from the configuration file.
+
+Each `[action:NAME]` section creates a subcommand. When `prompt` is true,
+running the action without a value opens dmenu using matching Timewarrior tags.
+When it is false, the action starts immediately with an empty value. Explicit
+values always bypass dmenu, and `aliases` is an optional comma-separated list.
