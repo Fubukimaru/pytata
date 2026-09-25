@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pytata"
+dynamic = ["version"]
+description = "A configurable Pomodoro helper for Taskwarrior and Timewarrior"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Alberto Gutierrez-Torre" },
+]
+keywords = ["pomodoro", "taskwarrior", "timewarrior", "productivity"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Office/Business :: Scheduling",
+]
+
+[project.scripts]
+pytata = "pytata:main"
+
+[project.urls]
+Homepage = "https://github.com/Fubukimaru/pytata"
+Issues = "https://github.com/Fubukimaru/pytata/issues"
+
+[tool.setuptools]
+py-modules = ["pytata"]
+
+[tool.setuptools.dynamic]
+version = { attr = "pytata.__version__" }

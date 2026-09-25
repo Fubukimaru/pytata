@@ -18,6 +18,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+__version__ = "0.1.0"
+
+
 DEFAULT_CONFIG = """\
 [pomodoro]
 work = 25
@@ -396,6 +399,9 @@ def build_parser(config: PytataConfig) -> argparse.ArgumentParser:
         prog="pytata",
         description="Unified Python CLI for the original patata shell helpers.",
     )
+    parser.add_argument(
+        "-V", "--version", action="version", version=f"%(prog)s {__version__}"
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     pomo = subparsers.add_parser("patata", help="Run the pomodoro timer.")
@@ -435,6 +441,9 @@ def build_parser(config: PytataConfig) -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv in (["-V"], ["--version"]):
+        print(f"pytata {__version__}")
+        return 0
 
     try:
         config = load_config()
@@ -444,7 +453,7 @@ def main(argv: list[str] | None = None) -> int:
             if selected_action is None:
                 return 0
             argv.append(selected_action)
-        elif argv[0].startswith("-"):
+        elif argv[0].startswith("-") and argv[0] not in {"-V", "--version"}:
             argv.insert(0, "patata")
 
         args = parser.parse_args(argv)

@@ -19,6 +19,33 @@ a shell Pomodoro timer with Taskwarrior integration.
 
 pytata itself only uses the Python standard library.
 
+## Installation
+
+The recommended installation method is [pipx](https://pipx.pypa.io/), which
+keeps command-line applications in isolated environments:
+
+```console
+pipx install git+https://github.com/Fubukimaru/pytata.git
+```
+
+To install from a local checkout with pip:
+
+```console
+python -m pip install .
+```
+
+For development, use an editable installation:
+
+```console
+python -m pip install --editable .
+```
+
+All methods create a `pytata` command. Confirm the installed version with:
+
+```console
+pytata --version
+```
+
 ## Usage
 
 Run the Pomodoro timer directly:
@@ -43,6 +70,15 @@ The other original helpers are available as subcommands:
 ```
 
 Use `./pytata.py COMMAND --help` for command-specific options.
+
+When installed as a package, replace `./pytata.py` in these examples with
+`pytata`.
+
+## Versioning
+
+pytata follows semantic versioning. The current version is defined once as
+`__version__` in `pytata.py`; package metadata and `pytata --version` both read
+that value.
 
 ## Configuration
 
