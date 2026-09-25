@@ -1,0 +1,15 @@
+#!/bin/sh
+
+ACTION=$1
+
+if [ "$#" -eq 1 ]; then 
+    ITEM=$(
+        timew tags $ACTION | 
+            awk 'NR>3 { sub(/[[:space:]]*-[[:space:]]*$/, "", $0); print }'|
+            dmenu -i -p "What to $ACTION?")
+else 
+    ITEM=$2
+fi
+
+notify-send "Patata: $ACTION $ITEM"
+tmux new-session -d -s patata -n patata -c ~/ patachrono "$ACTION" "$ITEM"

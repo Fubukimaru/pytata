@@ -1,0 +1,4 @@
+#!/bin/sh
+
+notify-send "Finishing task"
+tmux send-keys -t patata C-c

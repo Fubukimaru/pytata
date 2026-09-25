@@ -1,0 +1,4 @@
+#!/bin/sh
+
+dmenu_patata "planning" ""
+
