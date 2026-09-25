@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import json
 import os
 import re
 import shlex
@@ -140,23 +141,33 @@ def run_command(
 
 
 def task_id_from_next(task_filter: str | None = None) -> str:
-    args = ["task"]
-    if task_filter:
-        args.extend(task_filter.split())
-    args.extend(["next", "limit:1"])
+    args = ["task", "rc.json.array=on", "+PENDING", "-WAITING"]
+    try:
+        if task_filter:
+            args.extend(shlex.split(task_filter))
+    except ValueError as exc:
+        raise PatataError(f"Invalid Taskwarrior filter: {exc}") from exc
+    args.append("export")
 
     result = run_command(*args, capture=True)
     if result.returncode != 0:
         raise PatataError(result.stderr.strip() or "Unable to read the next Taskwarrior task.")
 
-    lines = result.stdout.splitlines()
-    if len(lines) < 4:
+    try:
+        tasks = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise PatataError(f"Invalid Taskwarrior JSON output: {exc}") from exc
+
+    if not isinstance(tasks, list):
+        raise PatataError("Invalid Taskwarrior JSON output: expected a list.")
+    if not tasks:
         raise PatataError("Taskwarrior did not return a task.")
 
-    fields = lines[3].strip().split()
-    if not fields:
-        raise PatataError("Taskwarrior output did not contain a task id.")
-    return fields[0]
+    try:
+        next_task = max(tasks, key=lambda task: float(task.get("urgency", 0)))
+        return str(next_task["uuid"])
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise PatataError(f"Invalid Taskwarrior JSON output: {exc}") from exc
 
 
 def task_command(task_id: str, command: str) -> None:
