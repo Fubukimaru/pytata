@@ -1,8 +1,11 @@
-# Pytata
+# pytata
 
-Pytata is a Python command-line Pomodoro helper built around Taskwarrior,
+pytata is a Python command-line Pomodoro helper built around Taskwarrior,
 Timewarrior, a configurable menu launcher, and tmux. It combines the scripts
 in `base_src/` into one executable.
+
+This project was inspired by [KubikPixel/patata](https://github.com/KubikPixel/patata),
+a shell Pomodoro timer with Taskwarrior integration.
 
 ## Requirements
 
@@ -14,7 +17,7 @@ in `base_src/` into one executable.
 - `notify-send`
 - `aplay` for notification sounds
 
-Pytata itself only uses the Python standard library.
+pytata itself only uses the Python standard library.
 
 ## Usage
 
@@ -43,7 +46,7 @@ Use `./pytata.py COMMAND --help` for command-specific options.
 
 ## Configuration
 
-On first use, Pytata creates `~/.config/pytata/config.ini`. It respects
+On first use, pytata creates `~/.config/pytata/config.ini`. It respects
 `XDG_CONFIG_HOME` when that environment variable is set.
 
 ```ini
@@ -76,7 +79,7 @@ Command-line options override values from the configuration file.
 ### Menu launchers
 
 The menu command receives choices on standard input and must print the selected
-line on standard output. It must include `{prompt}`, which Pytata replaces with
+line on standard output. It must include `{prompt}`, which pytata replaces with
 the current prompt before starting the process.
 
 Only one `command` entry should be active. Other launchers can be retained as
