@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,9 @@ pause = 5
 pomodori = 4
 num_beeps = 5
 notification = ~/share/linux/patata/notification.wav
+
+[menu]
+command = dmenu -i -p {prompt}
 
 [action:read]
 prompt = true
@@ -58,6 +62,7 @@ class PytataConfig:
     pomodori: int
     num_beeps: int
     notification: Path
+    menu_command: tuple[str, ...]
     actions: tuple[ActionConfig, ...]
 
 
@@ -96,6 +101,11 @@ def load_config(path: Path | None = None) -> PytataConfig:
         with path.open(encoding="utf-8") as config_file:
             parser.read_file(config_file)
         section = parser["pomodoro"]
+        menu_command = tuple(shlex.split(parser["menu"]["command"]))
+        if not menu_command:
+            raise ValueError("menu command cannot be empty")
+        if not any("{prompt}" in argument for argument in menu_command):
+            raise ValueError("menu command must include {prompt}")
         actions = tuple(
             ActionConfig(
                 name=section_name.removeprefix("action:").strip(),
@@ -118,6 +128,7 @@ def load_config(path: Path | None = None) -> PytataConfig:
             pomodori=int(section["pomodori"]),
             num_beeps=int(section["num_beeps"]),
             notification=Path(section["notification"]).expanduser(),
+            menu_command=menu_command,
             actions=actions,
         )
     except (OSError, KeyError, TypeError, ValueError, configparser.Error) as exc:
@@ -267,35 +278,43 @@ def pomodoro(args: argparse.Namespace) -> int:
         return 130
 
 
-def timewarrior_items(action: str) -> str:
+def timewarrior_items(action: str) -> list[str]:
     result = run_command("timew", "tags", action, capture=True)
-    lines = [re.sub(r"\s*-\s*$", "", line) for line in result.stdout.splitlines()[3:]]
-    return "\n".join(lines)
+    return [re.sub(r"\s*-\s*$", "", line) for line in result.stdout.splitlines()[3:]]
 
 
-def choose_item(action: str) -> str:
+def select_from_menu(
+    menu_command: tuple[str, ...], prompt: str, choices: Iterable[str]
+) -> str | None:
+    command = tuple(argument.replace("{prompt}", prompt) for argument in menu_command)
     result = run_command(
-        "dmenu",
-        "-i",
-        "-p",
-        f"What to {action}?",
+        *command,
         capture=True,
-        input_text=timewarrior_items(action),
-    )
-    return result.stdout.rstrip("\n")
-
-
-def choose_action(actions: tuple[ActionConfig, ...]) -> str | None:
-    result = run_command(
-        "dmenu",
-        "-i",
-        "-p",
-        "What to do?",
-        capture=True,
-        input_text="\n".join(action.name for action in actions),
+        input_text="\n".join(choices),
     )
     selected = result.stdout.rstrip("\n")
     if result.returncode != 0 or not selected:
+        return None
+    return selected
+
+
+def choose_item(action: str, menu_command: tuple[str, ...]) -> str | None:
+    return select_from_menu(
+        menu_command,
+        f"What to {action}?",
+        timewarrior_items(action),
+    )
+
+
+def choose_action(
+    actions: tuple[ActionConfig, ...], menu_command: tuple[str, ...]
+) -> str | None:
+    selected = select_from_menu(
+        menu_command,
+        "What to do?",
+        (action.name for action in actions),
+    )
+    if selected is None:
         return None
 
     valid_commands = {
@@ -308,8 +327,12 @@ def choose_action(actions: tuple[ActionConfig, ...]) -> str | None:
     return selected
 
 
-def dmenu_template(action: str, value: str | None = None) -> int:
-    item = choose_item(action) if value is None else value
+def start_action(
+    action: str, menu_command: tuple[str, ...], value: str | None = None
+) -> int:
+    item = choose_item(action, menu_command) if value is None else value
+    if item is None:
+        return 0
     run_command("notify-send", f"Patata: {action} {item}")
 
     chrono_command = shlex.join(
@@ -331,7 +354,7 @@ def dmenu_template(action: str, value: str | None = None) -> int:
 
 def run_action(args: argparse.Namespace) -> int:
     value = args.value if args.value is not None or args.action_prompt else ""
-    return dmenu_template(args.action_name, value)
+    return start_action(args.action_name, args.menu_command, value)
 
 
 def end(args: argparse.Namespace) -> int:
@@ -395,6 +418,7 @@ def build_parser(config: PytataConfig) -> argparse.ArgumentParser:
             func=run_action,
             action_name=action.name,
             action_prompt=action.prompt,
+            menu_command=config.menu_command,
         )
 
     end_parser = subparsers.add_parser("end")
@@ -416,7 +440,7 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config()
         parser = build_parser(config)
         if not argv:
-            selected_action = choose_action(config.actions)
+            selected_action = choose_action(config.actions, config.menu_command)
             if selected_action is None:
                 return 0
             argv.append(selected_action)
