@@ -73,9 +73,55 @@ prompt = true
 
 Command-line options override values from the configuration file.
 
+### Menu launchers
+
 The menu command receives choices on standard input and must print the selected
-line on standard output. `{prompt}` is replaced without invoking a shell. To use
-rofi instead, set `command = rofi -dmenu -i -p {prompt}`.
+line on standard output. It must include `{prompt}`, which Pytata replaces with
+the current prompt before starting the process.
+
+Only one `command` entry should be active. Other launchers can be retained as
+comments for quick switching:
+
+```ini
+[menu]
+# command = dmenu -i -p {prompt}
+command = rofi -dmenu -i -p {prompt}
+```
+
+Common configurations follow.
+
+#### dmenu (X11)
+
+```ini
+[menu]
+command = dmenu -i -p {prompt}
+```
+
+#### rofi (X11 or Wayland)
+
+```ini
+[menu]
+command = rofi -dmenu -i -p {prompt}
+```
+
+#### wofi (Wayland)
+
+```ini
+[menu]
+command = wofi --dmenu --prompt {prompt}
+```
+
+#### fuzzel (Wayland)
+
+```ini
+[menu]
+command = fuzzel --dmenu --prompt {prompt}
+```
+
+The command is parsed as arguments and executed directly, without a shell.
+Shell syntax such as pipes, redirects, aliases, and environment-variable
+expansion is therefore unavailable. The launcher executable must be in `PATH`;
+quoted arguments and absolute executable paths are supported.
 
 Each `[action:NAME]` section creates a subcommand. When `prompt` is true,
 running the action without a value opens the menu using matching Timewarrior tags.
