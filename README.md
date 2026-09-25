@@ -25,6 +25,8 @@ Run the Pomodoro timer directly:
 ./pytata.py --work 25 --pause 5 --pomodori 4
 ```
 
+Running `./pytata.py` without arguments opens dmenu with the configured actions.
+
 The other original helpers are available as subcommands:
 
 ```console
@@ -53,19 +55,16 @@ notification = ~/share/linux/patata/notification.wav
 
 [action:read]
 prompt = true
-aliases = pataread
 
 [action:planning]
 prompt = false
-aliases = plan, pataplan
+aliases = plan
 
 [action:mail]
 prompt = false
-aliases = patamail
 
 [action:meeting]
 prompt = true
-aliases = patameeting
 ```
 
 Command-line options override values from the configuration file.

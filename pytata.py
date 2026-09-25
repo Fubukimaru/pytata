@@ -26,19 +26,16 @@ notification = ~/share/linux/patata/notification.wav
 
 [action:read]
 prompt = true
-aliases = pataread
 
 [action:planning]
 prompt = false
-aliases = plan, pataplan
+aliases = plan
 
 [action:mail]
 prompt = false
-aliases = patamail
 
 [action:meeting]
 prompt = true
-aliases = patameeting
 """
 
 
@@ -67,9 +64,7 @@ def validate_actions(actions: tuple[ActionConfig, ...]) -> None:
     reserved = {
         "patata",
         "end",
-        "pataend",
         "chrono",
-        "patachrono",
     }
     seen = set(reserved)
     for action in actions:
@@ -282,6 +277,29 @@ def choose_item(action: str) -> str:
     return result.stdout.rstrip("\n")
 
 
+def choose_action(actions: tuple[ActionConfig, ...]) -> str | None:
+    result = run_command(
+        "dmenu",
+        "-i",
+        "-p",
+        "What to do?",
+        capture=True,
+        input_text="\n".join(action.name for action in actions),
+    )
+    selected = result.stdout.rstrip("\n")
+    if result.returncode != 0 or not selected:
+        return None
+
+    valid_commands = {
+        command_name
+        for action in actions
+        for command_name in (action.name, *action.aliases)
+    }
+    if selected not in valid_commands:
+        raise PatataError(f"Unknown action selected: {selected}")
+    return selected
+
+
 def dmenu_template(action: str, value: str | None = None) -> int:
     item = choose_item(action) if value is None else value
     run_command("notify-send", f"Patata: {action} {item}")
@@ -371,11 +389,11 @@ def build_parser(config: PytataConfig) -> argparse.ArgumentParser:
             action_prompt=action.prompt,
         )
 
-    end_parser = subparsers.add_parser("end", aliases=["pataend"])
+    end_parser = subparsers.add_parser("end")
     end_parser.add_argument("--target", default="patata")
     end_parser.set_defaults(func=end)
 
-    chrono_parser = subparsers.add_parser("chrono", aliases=["patachrono"])
+    chrono_parser = subparsers.add_parser("chrono")
     chrono_parser.add_argument("tags", nargs="*")
     chrono_parser.add_argument("--interval", type=int, default=10)
     chrono_parser.set_defaults(func=chrono)
@@ -387,8 +405,14 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
     try:
-        parser = build_parser(load_config())
-        if argv and argv[0].startswith("-"):
+        config = load_config()
+        parser = build_parser(config)
+        if not argv:
+            selected_action = choose_action(config.actions)
+            if selected_action is None:
+                return 0
+            argv.append(selected_action)
+        elif argv[0].startswith("-"):
             argv.insert(0, "patata")
 
         args = parser.parse_args(argv)
