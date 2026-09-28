@@ -48,15 +48,32 @@ pytata --version
 
 ## Usage
 
-Run the Pomodoro timer directly:
+Start a Pomodoro using the configured work duration, pause duration, number of
+Pomodoros, and notification settings:
 
 ```console
-./pytata.py patata
-./pytata.py --work 25 --pause 5 --pomodori 4
+pytata start
 ```
 
-Running `./pytata.py` without arguments opens the configured menu with the
-available actions.
+With no task or filter argument, `pytata start` selects the most urgent pending,
+non-waiting Taskwarrior task. Timer options can override the defaults:
+
+```console
+pytata start --work 25 --pause 5 --pomodori 4
+pytata --work 25 --pause 5 --pomodori 4
+```
+
+The second form is shorthand for the first.
+
+Running `pytata` without arguments opens the configured menu with the available
+custom actions.
+
+List every action, with built-in commands first and configured custom actions
+second. Aliases and descriptions are included:
+
+```console
+pytata -h
+```
 
 The other original helpers are available as subcommands:
 
@@ -98,16 +115,20 @@ command = dmenu -i -p {prompt}
 
 [action:read]
 prompt = true
+description = Track time spent reading.
 
 [action:planning]
 prompt = false
 aliases = plan
+description = Track planning work.
 
 [action:mail]
 prompt = false
+description = Track time spent on email.
 
 [action:meeting]
 prompt = true
+description = Track time spent in meetings.
 ```
 
 Command-line options override values from the configuration file.
@@ -164,5 +185,8 @@ quoted arguments and absolute executable paths are supported.
 
 Each `[action:NAME]` section creates a subcommand. When `prompt` is true,
 running the action without a value opens the menu using matching Timewarrior tags.
-When it is false, the action starts immediately with an empty value. Explicit
-values always bypass the menu, and `aliases` is an optional comma-separated list.
+When it is false, the action starts immediately using the action name as its
+Timewarrior tag. Explicit values add a second tag and always bypass the menu;
+`aliases` is an optional comma-separated list. The optional `description` is
+shown beside the action in `pytata -h`; when omitted, pytata generates a short
+description from the action name.

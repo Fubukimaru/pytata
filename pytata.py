@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 
 
 DEFAULT_CONFIG = """\
@@ -34,17 +34,28 @@ command = dmenu -i -p {prompt}
 
 [action:read]
 prompt = true
+description = Track time spent reading.
 
 [action:planning]
 prompt = false
 aliases = plan
+description = Track planning work.
 
 [action:mail]
 prompt = false
+description = Track time spent on email.
 
 [action:meeting]
 prompt = true
+description = Track time spent in meetings.
 """
+
+DEFAULT_ACTION_DESCRIPTIONS = {
+    "read": "Track time spent reading.",
+    "planning": "Track planning work.",
+    "mail": "Track time spent on email.",
+    "meeting": "Track time spent in meetings.",
+}
 
 
 class PatataError(RuntimeError):
@@ -56,6 +67,7 @@ class ActionConfig:
     name: str
     prompt: bool
     aliases: tuple[str, ...]
+    description: str
 
 
 @dataclass(frozen=True)
@@ -71,7 +83,7 @@ class PytataConfig:
 
 def validate_actions(actions: tuple[ActionConfig, ...]) -> None:
     reserved = {
-        "patata",
+        "start",
         "end",
         "chrono",
     }
@@ -117,6 +129,13 @@ def load_config(path: Path | None = None) -> PytataConfig:
                     alias.strip()
                     for alias in parser[section_name].get("aliases", "").split(",")
                     if alias.strip()
+                ),
+                description=(
+                    parser[section_name].get("description", "").strip()
+                    or DEFAULT_ACTION_DESCRIPTIONS.get(
+                        section_name.removeprefix("action:").strip(),
+                        f"Track time for {section_name.removeprefix('action:').strip()}.",
+                    )
                 ),
             )
             for section_name in parser.sections()
@@ -336,10 +355,14 @@ def start_action(
     item = choose_item(action, menu_command) if value is None else value
     if item is None:
         return 0
-    run_command("notify-send", f"Patata: {action} {item}")
+
+    tags = [action]
+    if item:
+        tags.append(item)
+    run_command("notify-send", f"Patata: {' '.join(tags)}")
 
     chrono_command = shlex.join(
-        [sys.executable, str(Path(__file__).resolve()), "chrono", action, item]
+        [sys.executable, str(Path(__file__).resolve()), "chrono", *tags]
     )
     return run_command(
         "tmux",
@@ -394,31 +417,83 @@ def chrono(args: argparse.Namespace) -> int:
         time.sleep(args.interval)
 
 
+def format_action_catalog(actions: tuple[ActionConfig, ...]) -> str:
+    default_actions = (
+        ("start", "Start a Pomodoro for the most urgent pending task."),
+        ("end", "Stop the active pytata session."),
+        ("chrono", "Run a Timewarrior timer."),
+    )
+    custom_actions = tuple(
+        (
+            f"{action.name} ({', '.join(action.aliases)})"
+            if action.aliases
+            else action.name,
+            action.description,
+        )
+        for action in actions
+    )
+    width = max(len(name) for name, _ in (*default_actions, *custom_actions))
+
+    def format_group(title: str, entries: tuple[tuple[str, str], ...]) -> str:
+        lines = [f"{title}:"]
+        lines.extend(f"  {name:<{width}}  {description}" for name, description in entries)
+        return "\n".join(lines)
+
+    return "\n\n".join(
+        (
+            format_group("default actions", default_actions),
+            format_group("custom actions", custom_actions),
+        )
+    )
+
+
 def build_parser(config: PytataConfig) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pytata",
         description="Unified Python CLI for the original patata shell helpers.",
+        epilog=format_action_catalog(config.actions),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "-V", "--version", action="version", version=f"%(prog)s {__version__}"
     )
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(dest="command", metavar="ACTION")
 
-    pomo = subparsers.add_parser("patata", help="Run the pomodoro timer.")
-    pomo.add_argument("-s", "--simple", action="store_true", help="Use simple line-oriented output.")
-    pomo.add_argument("-m", "--mute", action="store_true", help="Do not play notification sounds.")
-    pomo.add_argument("-w", "--work", type=int, default=config.work, metavar="MINUTES")
-    pomo.add_argument("-b", "--pause", type=int, default=config.pause, metavar="MINUTES")
-    pomo.add_argument("-p", "--pomodori", type=int, default=config.pomodori, metavar="COUNT")
-    pomo.add_argument("-t", "--task", metavar="TASK_ID")
-    pomo.add_argument("-o", "--output", metavar="STATUS_FILE")
-    pomo.add_argument("-f", "--filter", metavar="TASK_FILTER")
-    pomo.add_argument("--num-beeps", type=int, default=config.num_beeps)
-    pomo.add_argument("--sound", default=str(config.notification))
-    pomo.set_defaults(func=pomodoro)
+    start_parser = subparsers.add_parser(
+        "start",
+        description=(
+            "Start a Pomodoro timer. Without --task or --filter, pytata selects "
+            "the most urgent pending, non-waiting Taskwarrior task."
+        ),
+    )
+    start_parser.add_argument(
+        "-s", "--simple", action="store_true", help="Use simple line-oriented output."
+    )
+    start_parser.add_argument(
+        "-m", "--mute", action="store_true", help="Do not play notification sounds."
+    )
+    start_parser.add_argument(
+        "-w", "--work", type=int, default=config.work, metavar="MINUTES"
+    )
+    start_parser.add_argument(
+        "-b", "--pause", type=int, default=config.pause, metavar="MINUTES"
+    )
+    start_parser.add_argument(
+        "-p", "--pomodori", type=int, default=config.pomodori, metavar="COUNT"
+    )
+    start_parser.add_argument("-t", "--task", metavar="TASK_ID")
+    start_parser.add_argument("-o", "--output", metavar="STATUS_FILE")
+    start_parser.add_argument("-f", "--filter", metavar="TASK_FILTER")
+    start_parser.add_argument("--num-beeps", type=int, default=config.num_beeps)
+    start_parser.add_argument("--sound", default=str(config.notification))
+    start_parser.set_defaults(func=pomodoro)
 
     for action in config.actions:
-        action_parser = subparsers.add_parser(action.name, aliases=list(action.aliases))
+        action_parser = subparsers.add_parser(
+            action.name,
+            aliases=list(action.aliases),
+            description=action.description,
+        )
         action_parser.add_argument("value", nargs="?")
         action_parser.set_defaults(
             func=run_action,
@@ -427,11 +502,17 @@ def build_parser(config: PytataConfig) -> argparse.ArgumentParser:
             menu_command=config.menu_command,
         )
 
-    end_parser = subparsers.add_parser("end")
+    end_parser = subparsers.add_parser(
+        "end",
+        description="Stop the active pytata Timewarrior session.",
+    )
     end_parser.add_argument("--target", default="patata")
     end_parser.set_defaults(func=end)
 
-    chrono_parser = subparsers.add_parser("chrono")
+    chrono_parser = subparsers.add_parser(
+        "chrono",
+        description="Run the Timewarrior timer used by action commands.",
+    )
     chrono_parser.add_argument("tags", nargs="*")
     chrono_parser.add_argument("--interval", type=int, default=10)
     chrono_parser.set_defaults(func=chrono)
@@ -453,8 +534,13 @@ def main(argv: list[str] | None = None) -> int:
             if selected_action is None:
                 return 0
             argv.append(selected_action)
-        elif argv[0].startswith("-") and argv[0] not in {"-V", "--version"}:
-            argv.insert(0, "patata")
+        elif argv[0].startswith("-") and argv[0] not in {
+            "-h",
+            "--help",
+            "-V",
+            "--version",
+        }:
+            argv.insert(0, "start")
 
         args = parser.parse_args(argv)
         if not hasattr(args, "func"):
