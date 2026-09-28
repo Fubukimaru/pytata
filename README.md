@@ -65,8 +65,10 @@ pytata --work 25 --pause 5 --pomodori 4
 
 The second form is shorthand for the first.
 
-Running `pytata` without arguments opens the configured menu with the available
-custom actions.
+Running `pytata` without arguments opens the configured menu. It lists the
+standard `start` and `end` actions first, followed by configured custom actions.
+Every entry includes its description, and aliases are shown in parentheses.
+The lower-level `chrono` command remains CLI-only because it requires tags.
 
 List every action, with built-in commands first and configured custom actions
 second. Aliases and descriptions are included:
@@ -164,6 +166,11 @@ command = dmenu -i -p {prompt}
 command = rofi -dmenu -i -p {prompt}
 ```
 
+pytata uses rofi's row metadata automatically: rofi searches only command
+names and aliases, while still displaying each command's description. For
+example, searching for `end` does not match words inside the `start`
+description.
+
 #### wofi (Wayland)
 
 ```ini
@@ -182,6 +189,12 @@ The command is parsed as arguments and executed directly, without a shell.
 Shell syntax such as pipes, redirects, aliases, and environment-variable
 expansion is therefore unavailable. The launcher executable must be in `PATH`;
 quoted arguments and absolute executable paths are supported.
+
+The launcher displays entries in `command - description` format. Configured
+aliases are also shown, such as `planning (plan) - Track planning work.`
+Selecting a decorated entry runs its corresponding command. Launchers other
+than rofi receive these entries as plain text, so their matching behavior is
+controlled by the launcher itself.
 
 Each `[action:NAME]` section creates a subcommand. When `prompt` is true,
 running the action without a value opens the menu using matching Timewarrior tags.

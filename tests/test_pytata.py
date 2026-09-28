@@ -43,6 +43,72 @@ class StartActionTests(unittest.TestCase):
         run_command.assert_not_called()
 
 
+class ActionMenuTests(unittest.TestCase):
+    def setUp(self):
+        self.actions = (
+            pytata.ActionConfig(
+                name="custom",
+                prompt=False,
+                aliases=("c",),
+                description="Track a custom activity.",
+            ),
+        )
+        self.menu_command = ("dmenu", "-p", "{prompt}")
+
+    @patch("pytata.select_from_menu")
+    def test_menu_lists_builtins_and_custom_actions_with_descriptions(self, select):
+        select.return_value = (
+            "start - Start a Pomodoro for the most urgent pending task."
+        )
+
+        result = pytata.choose_action(self.actions, self.menu_command)
+
+        self.assertEqual(result, "start")
+        choices = list(select.call_args.args[2])
+        self.assertEqual(
+            choices,
+            [
+                "start - Start a Pomodoro for the most urgent pending task.",
+                "end - Stop the active pytata session.",
+                "custom (c) - Track a custom activity.",
+            ],
+        )
+
+    @patch("pytata.select_from_menu")
+    def test_typed_alias_remains_valid(self, select):
+        select.return_value = "c"
+
+        result = pytata.choose_action(self.actions, self.menu_command)
+
+        self.assertEqual(result, "c")
+
+    @patch("pytata.select_from_menu")
+    def test_rofi_searches_commands_but_displays_descriptions(self, select):
+        select.return_value = "end"
+
+        result = pytata.choose_action(
+            self.actions,
+            ("rofi", "-dmenu", "-i", "-p", "{prompt}"),
+        )
+
+        self.assertEqual(result, "end")
+        choices = list(select.call_args.args[2])
+        self.assertEqual(
+            choices,
+            [
+                "start\0display\x1f"
+                "start - Start a Pomodoro for the most urgent pending task.",
+                "end\0display\x1fend - Stop the active pytata session.",
+                "custom\0display\x1fcustom (c) - Track a custom activity."
+                "\0meta\x1fc",
+            ],
+        )
+        self.assertEqual(
+            [choice.split("\0", 1)[0] for choice in choices],
+            ["start", "end", "custom"],
+        )
+
+
 class HelpTests(unittest.TestCase):
     def setUp(self):
         self.config = pytata.PytataConfig(

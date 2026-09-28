@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-__version__ = "0.3.0"
+__version__ = "0.4.1"
 
 
 DEFAULT_CONFIG = """\
@@ -56,6 +56,14 @@ DEFAULT_ACTION_DESCRIPTIONS = {
     "mail": "Track time spent on email.",
     "meeting": "Track time spent in meetings.",
 }
+
+BUILTIN_ACTION_DESCRIPTIONS = {
+    "start": "Start a Pomodoro for the most urgent pending task.",
+    "end": "Stop the active pytata session.",
+    "chrono": "Run a Timewarrior timer.",
+}
+
+MENU_BUILTIN_ACTIONS = ("start", "end")
 
 
 class PatataError(RuntimeError):
@@ -328,18 +336,60 @@ def choose_item(action: str, menu_command: tuple[str, ...]) -> str | None:
     )
 
 
+def is_rofi_menu(menu_command: tuple[str, ...]) -> bool:
+    return Path(menu_command[0]).name == "rofi" and "-dmenu" in menu_command
+
+
+def rofi_menu_row(command: str, label: str, aliases: tuple[str, ...]) -> str:
+    row = f"{command}\0display\x1f{label}"
+    if aliases:
+        row += f"\0meta\x1f{' '.join(aliases)}"
+    return row
+
+
 def choose_action(
     actions: tuple[ActionConfig, ...], menu_command: tuple[str, ...]
 ) -> str | None:
+    entries = [
+        (
+            f"{name} - {BUILTIN_ACTION_DESCRIPTIONS[name]}",
+            name,
+            (),
+        )
+        for name in MENU_BUILTIN_ACTIONS
+    ]
+    entries.extend(
+        (
+            (
+                f"{action.name} ({', '.join(action.aliases)}) - {action.description}"
+                if action.aliases
+                else f"{action.name} - {action.description}"
+            ),
+            action.name,
+            action.aliases,
+        )
+        for action in actions
+    )
+    labels = {label: command for label, command, _ in entries}
+    choices = (
+        (
+            rofi_menu_row(command, label, aliases)
+            for label, command, aliases in entries
+        )
+        if is_rofi_menu(menu_command)
+        else labels
+    )
     selected = select_from_menu(
         menu_command,
         "What to do?",
-        (action.name for action in actions),
+        choices,
     )
     if selected is None:
         return None
+    if selected in labels:
+        return labels[selected]
 
-    valid_commands = {
+    valid_commands = set(MENU_BUILTIN_ACTIONS) | {
         command_name
         for action in actions
         for command_name in (action.name, *action.aliases)
@@ -418,11 +468,7 @@ def chrono(args: argparse.Namespace) -> int:
 
 
 def format_action_catalog(actions: tuple[ActionConfig, ...]) -> str:
-    default_actions = (
-        ("start", "Start a Pomodoro for the most urgent pending task."),
-        ("end", "Stop the active pytata session."),
-        ("chrono", "Run a Timewarrior timer."),
-    )
+    default_actions = tuple(BUILTIN_ACTION_DESCRIPTIONS.items())
     custom_actions = tuple(
         (
             f"{action.name} ({', '.join(action.aliases)})"
