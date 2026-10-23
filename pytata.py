@@ -8,6 +8,7 @@ import configparser
 import json
 import os
 import re
+import select
 import shlex
 import signal
 import subprocess
@@ -215,12 +216,38 @@ def task_command(task_id: str, command: str) -> None:
     run_command("task", task_id, command)
 
 
-def play_notification(num_beeps: int, sound: Path) -> None:
+def play_notification(num_beeps: int, sound: Path, interactive: bool = False) -> bool:
+    """Play the alert, returning whether Enter acknowledged it during playback."""
+    stdin = sys.stdin if interactive else None
     for _ in range(num_beeps):
         try:
-            run_command("aplay", "-q", str(sound))
+            if not interactive:
+                run_command("aplay", "-q", str(sound))
+                continue
+            player = subprocess.Popen(
+                ["aplay", "-q", str(sound)], stdin=subprocess.DEVNULL
+            )
         except FileNotFoundError:
-            return
+            return False
+        try:
+            while player.poll() is None:
+                if stdin is None:
+                    player.wait()
+                    break
+                readable, _, _ = select.select([stdin], [], [], 0.05)
+                if readable:
+                    if stdin.readline():
+                        return True
+                    stdin = None  # EOF must not cause a busy loop or skip the alert.
+        finally:
+            if player.poll() is None:
+                player.terminate()
+                try:
+                    player.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    player.kill()
+                    player.wait()
+    return False
 
 
 def write_status(status_file: Path | None, text: str) -> None:
@@ -276,13 +303,18 @@ def pomodoro(args: argparse.Namespace) -> int:
 
             run_interval(args.work, "work", status_file, args.simple)
 
-            if not args.mute:
-                play_notification(args.num_beeps, Path(args.sound).expanduser())
-
             if not args.simple:
                 print("\a")
-                print("Work over")
+                print("Work over (press Enter to continue)", flush=True)
                 write_status(status_file, "Work over. \u00a1Estira!\n")
+
+            acknowledged = False
+            if not args.mute:
+                acknowledged = play_notification(
+                    args.num_beeps, Path(args.sound).expanduser(), interactive=not args.simple
+                )
+
+            if not args.simple and not acknowledged:
                 wait_for_enter_if_interactive(True)
 
             if current == 1:
@@ -290,13 +322,18 @@ def pomodoro(args: argparse.Namespace) -> int:
 
             run_interval(args.pause, "pause", status_file, args.simple)
 
-            if not args.mute:
-                play_notification(args.num_beeps, Path(args.sound).expanduser())
-
             if not args.simple:
                 print("\a")
-                print("Pause over")
+                print("Pause over (press Enter to continue)", flush=True)
                 write_status(status_file, "Pause over\n")
+
+            acknowledged = False
+            if not args.mute:
+                acknowledged = play_notification(
+                    args.num_beeps, Path(args.sound).expanduser(), interactive=not args.simple
+                )
+
+            if not args.simple and not acknowledged:
                 wait_for_enter_if_interactive(True)
 
         task_command(task_id, "stop")

@@ -65,6 +65,10 @@ pytata --work 25 --pause 5 --pomodori 4
 
 The second form is shorthand for the first.
 
+When work or a pause ends, press Enter to continue. You can press Enter while
+the notification is still playing to stop the sound and continue immediately.
+With `--simple`, notifications play in full and the timer continues automatically.
+
 Running `pytata` without arguments opens the configured menu. It lists the
 standard `start` and `end` actions first, followed by configured custom actions.
 Every entry includes its description, and aliases are shown in parentheses.

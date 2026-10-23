@@ -1,10 +1,104 @@
+import argparse
+import os
 import shlex
+import subprocess
+import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from unittest.mock import patch
 
 import pytata
+
+
+class NotificationTests(unittest.TestCase):
+    def test_enter_stops_active_player_and_remaining_beeps(self):
+        read_fd, write_fd = os.pipe()
+        with os.fdopen(write_fd, "w") as writer:
+            writer.write("\n")
+        player = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            with os.fdopen(read_fd) as stdin, patch("pytata.sys.stdin", stdin), patch(
+                "pytata.subprocess.Popen", return_value=player
+            ) as launch:
+                acknowledged = pytata.play_notification(5, pytata.Path("alert.wav"), True)
+
+            self.assertTrue(acknowledged)
+            launch.assert_called_once_with(
+                ["aplay", "-q", "alert.wav"], stdin=subprocess.DEVNULL
+            )
+            self.assertIsNotNone(player.poll())
+        finally:
+            if player.poll() is None:
+                player.kill()
+            player.wait()
+
+    @patch("pytata.select.select", return_value=([], [], []))
+    @patch("pytata.subprocess.Popen")
+    def test_completed_alert_still_needs_acknowledgment(self, launch, select):
+        launch.return_value.poll.side_effect = [None, 0, 0] * 2
+
+        self.assertFalse(pytata.play_notification(2, pytata.Path("alert.wav"), True))
+
+        self.assertEqual(launch.call_count, 2)
+        launch.return_value.terminate.assert_not_called()
+
+    @patch("pytata.sys.stdin", new_callable=StringIO)
+    @patch("pytata.select.select")
+    @patch("pytata.subprocess.Popen")
+    def test_eof_does_not_skip_remaining_beeps(self, launch, select, stdin):
+        select.return_value = ([stdin], [], [])
+        launch.return_value.poll.side_effect = [None, None, 0, None, 0]
+
+        self.assertFalse(pytata.play_notification(2, pytata.Path("alert.wav"), True))
+
+        self.assertEqual(launch.call_count, 2)
+        select.assert_called_once()
+        self.assertEqual(launch.return_value.wait.call_count, 2)
+
+    @patch("pytata.subprocess.Popen", side_effect=FileNotFoundError)
+    def test_missing_player_still_needs_acknowledgment(self, launch):
+        self.assertFalse(pytata.play_notification(5, pytata.Path("alert.wav"), True))
+
+    @patch("pytata.select.select", side_effect=KeyboardInterrupt)
+    @patch("pytata.subprocess.Popen")
+    def test_interrupt_cleans_up_player(self, launch, select):
+        launch.return_value.poll.return_value = None
+
+        with self.assertRaises(KeyboardInterrupt):
+            pytata.play_notification(5, pytata.Path("alert.wav"), True)
+
+        launch.return_value.terminate.assert_called_once()
+        launch.return_value.wait.assert_called_once_with(timeout=1)
+
+    @patch("pytata.run_command")
+    @patch("pytata.select.select")
+    def test_simple_notifications_play_in_full_without_reading_input(self, select, run):
+        self.assertFalse(pytata.play_notification(3, pytata.Path("alert.wav")))
+
+        self.assertEqual(run.call_count, 3)
+        select.assert_not_called()
+
+
+class PomodoroNotificationTests(unittest.TestCase):
+    def test_acknowledgment_during_work_and_pause_does_not_wait_twice(self):
+        args = argparse.Namespace(
+            task="task-id", output=None, pomodori=2, work=0, pause=0,
+            simple=False, mute=False, num_beeps=5, sound="alert.wav",
+        )
+        for acknowledged in (True, False):
+            with self.subTest(acknowledged=acknowledged), patch(
+                "pytata.signal.signal"
+            ), patch("pytata.run_command"), patch(
+                "pytata.play_notification", return_value=acknowledged
+            ) as play, patch("pytata.wait_for_enter_if_interactive") as wait, redirect_stdout(
+                StringIO()
+            ):
+                self.assertEqual(pytata.pomodoro(args), 0)
+                self.assertEqual(play.call_count, 3)
+                self.assertEqual(wait.call_count, 0 if acknowledged else 3)
+                for call in play.call_args_list:
+                    self.assertTrue(call.kwargs["interactive"])
 
 
 class StartActionTests(unittest.TestCase):
