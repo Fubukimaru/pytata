@@ -1,5 +1,7 @@
 import argparse
 import os
+import pty
+import select
 import shlex
 import subprocess
 import sys
@@ -81,6 +83,34 @@ class NotificationTests(unittest.TestCase):
 
 
 class PomodoroNotificationTests(unittest.TestCase):
+    def test_countdown_input_cannot_dismiss_work_or_pause_prompt(self):
+        args = argparse.Namespace(
+            task="task-id", output=None, pomodori=2, work=0, pause=0,
+            simple=False, mute=True, num_beeps=5, sound="alert.wav",
+        )
+        master, slave = pty.openpty()
+        try:
+            with os.fdopen(slave) as stdin, patch("pytata.sys.stdin", stdin), patch(
+                "pytata.signal.signal"
+            ), patch("pytata.run_command"), redirect_stdout(StringIO()):
+                def countdown(*_):
+                    os.write(master, b"\n")
+                    self.assertTrue(select.select([stdin], [], [], 1)[0])
+
+                def acknowledge(_):
+                    self.assertFalse(select.select([stdin], [], [], 0)[0])
+                    os.write(master, b"\n")
+                    self.assertTrue(select.select([stdin], [], [], 1)[0])
+                    self.assertEqual(stdin.readline(), "\n")
+
+                with patch("pytata.run_interval", side_effect=countdown), patch(
+                    "pytata.wait_for_enter_if_interactive", side_effect=acknowledge
+                ) as wait:
+                    self.assertEqual(pytata.pomodoro(args), 0)
+                    self.assertEqual(wait.call_count, 3)
+        finally:
+            os.close(master)
+
     def test_acknowledgment_during_work_and_pause_does_not_wait_twice(self):
         args = argparse.Namespace(
             task="task-id", output=None, pomodori=2, work=0, pause=0,

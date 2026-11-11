@@ -67,6 +67,7 @@ The second form is shorthand for the first.
 
 When work or a pause ends, press Enter to continue. You can press Enter while
 the notification is still playing to stop the sound and continue immediately.
+Enter presses during the countdown do not dismiss the next notification.
 With `--simple`, notifications play in full and the timer continues automatically.
 
 Running `pytata` without arguments opens the configured menu. It lists the

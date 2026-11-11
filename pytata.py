@@ -13,6 +13,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import termios
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -268,6 +269,12 @@ def wait_for_enter_if_interactive(interactive: bool) -> None:
             pass
 
 
+def discard_pending_terminal_input() -> None:
+    """Require a fresh acknowledgment after a countdown finishes."""
+    if sys.stdin.isatty():
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+
+
 def sleep_minutes(minutes: int) -> None:
     time.sleep(minutes * 60)
 
@@ -304,6 +311,7 @@ def pomodoro(args: argparse.Namespace) -> int:
             run_interval(args.work, "work", status_file, args.simple)
 
             if not args.simple:
+                discard_pending_terminal_input()
                 print("\a")
                 print("Work over (press Enter to continue)", flush=True)
                 write_status(status_file, "Work over. \u00a1Estira!\n")
@@ -323,6 +331,7 @@ def pomodoro(args: argparse.Namespace) -> int:
             run_interval(args.pause, "pause", status_file, args.simple)
 
             if not args.simple:
+                discard_pending_terminal_input()
                 print("\a")
                 print("Pause over (press Enter to continue)", flush=True)
                 write_status(status_file, "Pause over\n")
