@@ -8,6 +8,7 @@ dynamic = ["version"]
 description = "A configurable Pomodoro helper for Taskwarrior and Timewarrior"
 readme = "README.md"
 requires-python = ">=3.10"
+dependencies = ["miniaudio>=1.61,<2"]
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 authors = [

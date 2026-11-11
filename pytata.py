@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-__version__ = "0.4.3"
+__version__ = "0.4.4"
 
 
 DEFAULT_CONFIG = """\
@@ -219,35 +219,52 @@ def task_command(task_id: str, command: str) -> None:
 
 def play_notification(num_beeps: int, sound: Path, interactive: bool = False) -> bool:
     """Play the alert, returning whether Enter acknowledged it during playback."""
+    if num_beeps <= 0:
+        return False
+    try:
+        import miniaudio
+    except ImportError:
+        print("Unable to play notification: install miniaudio or reinstall pytata.", file=sys.stderr)
+        return False
+
     stdin = sys.stdin if interactive else None
-    for _ in range(num_beeps):
-        try:
-            if not interactive:
-                run_command("aplay", "-q", str(sound))
-                continue
-            player = subprocess.Popen(
-                ["aplay", "-q", str(sound)], stdin=subprocess.DEVNULL
-            )
-        except FileNotFoundError:
+    try:
+        decoded = miniaudio.decode_file(str(sound))
+        if not decoded.num_frames:
             return False
-        try:
-            while player.poll() is None:
+
+        def samples():
+            required_frames = yield b""
+            for _ in range(num_beeps):
+                source = miniaudio.stream_raw_pcm_memory(
+                    decoded.samples, decoded.nchannels, decoded.sample_width
+                )
+                while True:
+                    try:
+                        chunk = source.send(required_frames)
+                    except StopIteration:
+                        break
+                    required_frames = yield chunk
+
+        stream = samples()
+        next(stream)
+        with miniaudio.PlaybackDevice(
+            output_format=decoded.sample_format,
+            nchannels=decoded.nchannels,
+            sample_rate=decoded.sample_rate,
+        ) as device:
+            device.start(stream)
+            while device.running:
                 if stdin is None:
-                    player.wait()
-                    break
+                    time.sleep(0.05)
+                    continue
                 readable, _, _ = select.select([stdin], [], [], 0.05)
                 if readable:
                     if stdin.readline():
                         return True
                     stdin = None  # EOF must not cause a busy loop or skip the alert.
-        finally:
-            if player.poll() is None:
-                player.terminate()
-                try:
-                    player.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    player.kill()
-                    player.wait()
+    except (miniaudio.MiniaudioError, OSError) as exc:
+        print(f"Unable to play notification: {exc}", file=sys.stderr)
     return False
 
 

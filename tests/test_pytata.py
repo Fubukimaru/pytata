@@ -1,85 +1,142 @@
 import argparse
+from array import array
 import os
 import pty
 import select
 import shlex
-import subprocess
 import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
-from unittest.mock import patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytata
 
 
 class NotificationTests(unittest.TestCase):
-    def test_enter_stops_active_player_and_remaining_beeps(self):
+    def setUp(self):
+        self.audio = MagicMock()
+        self.audio.MiniaudioError = type("AudioError", (Exception,), {})
+        self.decoded = self.audio.decode_file.return_value
+        self.decoded.samples = array("h", range(10))
+        self.decoded.nchannels = 2
+        self.decoded.sample_width = 2
+        self.decoded.sample_rate = 44100
+        self.decoded.num_frames = 5
+        self.device = self.audio.PlaybackDevice.return_value.__enter__.return_value
+        self.device.start.side_effect = self.start
+        type(self.device).running = PropertyMock(side_effect=self.advance)
+        self.audio.stream_raw_pcm_memory.side_effect = self.raw_stream
+        self.played = bytearray()
+        self.modules = patch.dict(sys.modules, {"miniaudio": self.audio})
+        self.modules.start()
+        self.addCleanup(self.modules.stop)
+        sleep = patch("pytata.time.sleep")
+        self.sleep = sleep.start()
+        self.addCleanup(sleep.stop)
+
+    def start(self, stream):
+        self.stream = stream
+
+    def advance(self):
+        try:
+            chunk = self.stream.send(3)
+        except StopIteration:
+            return False
+        self.assertLessEqual(len(chunk), 3 * 2 * 2)
+        self.played.extend(chunk)
+        return True
+
+    @staticmethod
+    def raw_stream(samples, channels, width):
+        def generate():
+            frames = yield b""
+            data = samples.tobytes()
+            offset = 0
+            while offset < len(data):
+                end = offset + frames * channels * width
+                frames = yield data[offset:end]
+                offset = end
+        stream = generate()
+        next(stream)
+        return stream
+
+    def test_configured_number_of_beeps(self):
+        for count in (1, 2, 5, 10):
+            with self.subTest(count=count):
+                self.played.clear()
+                self.assertFalse(pytata.play_notification(count, pytata.Path("alert.wav")))
+                self.assertEqual(self.played, self.decoded.samples.tobytes() * count)
+        self.assertEqual(self.audio.decode_file.call_count, 4)
+        self.assertEqual(self.audio.PlaybackDevice.return_value.__exit__.call_count, 4)
+
+    def test_zero_beeps_does_not_open_audio_device(self):
+        self.assertFalse(pytata.play_notification(0, pytata.Path("alert.wav")))
+        self.audio.decode_file.assert_not_called()
+        self.audio.PlaybackDevice.assert_not_called()
+
+    def test_enter_stops_current_sound_and_remaining_repeats(self):
         read_fd, write_fd = os.pipe()
         with os.fdopen(write_fd, "w") as writer:
             writer.write("\n")
-        player = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-        try:
-            with os.fdopen(read_fd) as stdin, patch("pytata.sys.stdin", stdin), patch(
-                "pytata.subprocess.Popen", return_value=player
-            ) as launch:
-                acknowledged = pytata.play_notification(5, pytata.Path("alert.wav"), True)
-
-            self.assertTrue(acknowledged)
-            launch.assert_called_once_with(
-                ["aplay", "-q", "alert.wav"], stdin=subprocess.DEVNULL
-            )
-            self.assertIsNotNone(player.poll())
-        finally:
-            if player.poll() is None:
-                player.kill()
-            player.wait()
+        with os.fdopen(read_fd) as stdin, patch("pytata.sys.stdin", stdin):
+            self.assertTrue(pytata.play_notification(10, pytata.Path("alert.wav"), True))
+        self.assertLess(len(self.played), len(self.decoded.samples.tobytes()))
+        self.audio.PlaybackDevice.return_value.__exit__.assert_called_once()
 
     @patch("pytata.select.select", return_value=([], [], []))
-    @patch("pytata.subprocess.Popen")
-    def test_completed_alert_still_needs_acknowledgment(self, launch, select):
-        launch.return_value.poll.side_effect = [None, 0, 0] * 2
-
+    def test_completed_alert_still_needs_acknowledgment(self, select):
         self.assertFalse(pytata.play_notification(2, pytata.Path("alert.wav"), True))
-
-        self.assertEqual(launch.call_count, 2)
-        launch.return_value.terminate.assert_not_called()
+        self.assertEqual(self.played, self.decoded.samples.tobytes() * 2)
+        self.audio.PlaybackDevice.return_value.__exit__.assert_called_once()
 
     @patch("pytata.sys.stdin", new_callable=StringIO)
     @patch("pytata.select.select")
-    @patch("pytata.subprocess.Popen")
-    def test_eof_does_not_skip_remaining_beeps(self, launch, select, stdin):
+    def test_eof_does_not_stop_playback(self, select, stdin):
         select.return_value = ([stdin], [], [])
-        launch.return_value.poll.side_effect = [None, None, 0, None, 0]
-
-        self.assertFalse(pytata.play_notification(2, pytata.Path("alert.wav"), True))
-
-        self.assertEqual(launch.call_count, 2)
-        select.assert_called_once()
-        self.assertEqual(launch.return_value.wait.call_count, 2)
-
-    @patch("pytata.subprocess.Popen", side_effect=FileNotFoundError)
-    def test_missing_player_still_needs_acknowledgment(self, launch):
         self.assertFalse(pytata.play_notification(5, pytata.Path("alert.wav"), True))
+        self.assertEqual(self.played, self.decoded.samples.tobytes() * 5)
+        select.assert_called_once()
+        self.sleep.assert_called()
+        self.audio.PlaybackDevice.return_value.__exit__.assert_called_once()
 
     @patch("pytata.select.select", side_effect=KeyboardInterrupt)
-    @patch("pytata.subprocess.Popen")
-    def test_interrupt_cleans_up_player(self, launch, select):
-        launch.return_value.poll.return_value = None
-
+    def test_interrupt_releases_audio_device(self, select):
         with self.assertRaises(KeyboardInterrupt):
             pytata.play_notification(5, pytata.Path("alert.wav"), True)
+        self.audio.PlaybackDevice.return_value.__exit__.assert_called_once()
 
-        launch.return_value.terminate.assert_called_once()
-        launch.return_value.wait.assert_called_once_with(timeout=1)
-
-    @patch("pytata.run_command")
     @patch("pytata.select.select")
-    def test_simple_notifications_play_in_full_without_reading_input(self, select, run):
+    def test_simple_notifications_play_in_full_without_reading_input(self, select):
         self.assertFalse(pytata.play_notification(3, pytata.Path("alert.wav")))
-
-        self.assertEqual(run.call_count, 3)
+        self.assertEqual(self.played, self.decoded.samples.tobytes() * 3)
         select.assert_not_called()
+        self.audio.PlaybackDevice.return_value.__exit__.assert_called_once()
+
+    def test_invalid_sound_reports_error(self):
+        for failure in (FileNotFoundError("alert.wav"), self.audio.MiniaudioError("Invalid sound")):
+            with self.subTest(failure=failure), redirect_stderr(StringIO()) as stderr:
+                self.audio.decode_file.side_effect = failure
+                self.assertFalse(pytata.play_notification(5, pytata.Path("alert.wav")))
+                self.assertIn("Unable to play notification", stderr.getvalue())
+        self.audio.PlaybackDevice.assert_not_called()
+
+    def test_start_failure_releases_device(self):
+        self.device.start.side_effect = self.audio.MiniaudioError("No audio device")
+        with redirect_stderr(StringIO()) as stderr:
+            self.assertFalse(pytata.play_notification(5, pytata.Path("alert.wav")))
+        self.assertIn("No audio device", stderr.getvalue())
+        self.audio.PlaybackDevice.return_value.__exit__.assert_called_once()
+
+    def test_empty_sound_does_not_open_device(self):
+        self.decoded.num_frames = 0
+        self.assertFalse(pytata.play_notification(5, pytata.Path("alert.wav")))
+        self.audio.PlaybackDevice.assert_not_called()
+
+    def test_missing_dependency_still_allows_enter_prompt(self):
+        with patch.dict(sys.modules, {"miniaudio": None}), redirect_stderr(StringIO()) as stderr:
+            self.assertFalse(pytata.play_notification(5, pytata.Path("alert.wav")))
+        self.assertIn("install miniaudio", stderr.getvalue())
 
 
 class PomodoroNotificationTests(unittest.TestCase):

@@ -15,9 +15,10 @@ a shell Pomodoro timer with Taskwarrior integration.
 - tmux
 - dmenu, rofi, or another compatible menu launcher
 - `notify-send`
-- `aplay` for notification sounds
 
-pytata itself only uses the Python standard library.
+Notification sounds use the Python `miniaudio` package, installed automatically
+with pytata. No external sound player or separate PortAudio installation is
+required. WAV, MP3, FLAC, and Ogg Vorbis notification files are supported.
 
 ## Installation
 
